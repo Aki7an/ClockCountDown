@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>Cuenta atrás 14s sincronizada</title>
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-database.js"></script>
+</head>
+<body>
+  <h1>Cuenta atrás</h1>
+  <div id="timer" style="font-size:3em">--</div>
+  <button id="startBtn">Iniciar / Reset 14s</button>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.2/firebase-app.js";
+    import { getDatabase, ref, set, onValue } from "https://www.gstatic.com/firebasejs/9.22.2/firebase-database.js";
+
+    // 🔹 Pega aquí tus credenciales Firebase
+    const firebaseConfig = {
+      apiKey: "TU_APIKEY",
+      authDomain: "TU_PROYECTO.firebaseapp.com",
+      databaseURL: "https://TU_PROYECTO.firebaseio.com",
+      projectId: "TU_PROYECTO",
+      storageBucket: "TU_PROYECTO.appspot.com",
+      messagingSenderId: "XXXXXX",
+      appId: "1:XXXXXX:web:YYYYYY"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getDatabase(app);
+    const timerRef = ref(db, "countdown/start");
+
+    // Al pulsar botón, guardar timestamp actual en BD
+    document.getElementById("startBtn").onclick = () => {
+      set(timerRef, Date.now());
+    };
+
+    // Escuchar cambios en BD y actualizar cuenta atrás
+    let lastStart = null;
+    onValue(timerRef, (snap) => {
+      lastStart = snap.val();
+    });
+
+    // loop para mostrar cuenta atrás
+    setInterval(() => {
+      if (lastStart) {
+        const elapsed = (Date.now() - lastStart) / 1000;
+        const remaining = 14 - elapsed;
+        document.getElementById("timer").innerText =
+          remaining > 0 ? remaining.toFixed(1) + " s" : "0.0";
+      }
+    }, 100);
+  </script>
+</body>
+</html>
