@@ -3,53 +3,116 @@
 <head>
   <meta charset="utf-8">
   <title>Cuenta atrás 14s sincronizada</title>
-  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-database.js"></script>
-</head>
-<body>
-  <h1>Cuenta atrás</h1>
-  <div id="timer" style="font-size:3em">--</div>
-  <button id="startBtn">Iniciar / Reset 14s</button>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; padding: 24px; }
+    #timer { font-size: 4rem; font-weight: 700; letter-spacing: .03em; }
+    .row { display:flex; gap:12px; align-items:center; flex-wrap: wrap; }
+    button { padding:10px 16px; border-radius:12px; border:1px solid #cbd5e1; background:#2563eb; color:#fff; cursor:pointer; }
+    button:disabled { background:#cbd5e1; color:#475569; cursor:not-allowed; }
+    .pill { font-size:.85rem; padding:4px 10px; border-radius:999px; background:#e2e8f0; }
+  </style>
 
+  <!-- Firebase v9 (modular) -->
   <script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.2/firebase-app.js";
-    import { getDatabase, ref, set, onValue } from "https://www.gstatic.com/firebasejs/9.22.2/firebase-database.js";
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+    import {
+      getDatabase, ref, onValue, set, serverTimestamp
+    } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 
-    // 🔹 Pega aquí tus credenciales Firebase
+    // 1) Configura tus credenciales
     const firebaseConfig = {
-      apiKey: "TU_APIKEY",
+      apiKey: "TU_API_KEY",
       authDomain: "TU_PROYECTO.firebaseapp.com",
-      databaseURL: "https://TU_PROYECTO.firebaseio.com",
+      databaseURL: "https://TU_PROYECTO-default-rtdb.europe-west1.firebasedatabase.app",
       projectId: "TU_PROYECTO",
       storageBucket: "TU_PROYECTO.appspot.com",
-      messagingSenderId: "XXXXXX",
-      appId: "1:XXXXXX:web:YYYYYY"
+      messagingSenderId: "XXXXXXXXXXXX",
+      appId: "1:XXXXXXXXXXXX:web:YYYYYYYYYYYYYY"
     };
 
+    // 2) Inicializa
     const app = initializeApp(firebaseConfig);
     const db = getDatabase(app);
-    const timerRef = ref(db, "countdown/start");
 
-    // Al pulsar botón, guardar timestamp actual en BD
-    document.getElementById("startBtn").onclick = () => {
-      set(timerRef, Date.now());
-    };
+    // Un único “canal” global para todos los móviles
+    const startRef = ref(db, "countdown/global/start"); // ms epoch del servidor
+    const offsetRef = ref(db, ".info/serverTimeOffset"); // desfase cliente-servidor
 
-    // Escuchar cambios en BD y actualizar cuenta atrás
-    let lastStart = null;
-    onValue(timerRef, (snap) => {
-      lastStart = snap.val();
+    // Estado local
+    let serverOffsetMs = 0;   // desfase (ms) que sumamos a Date.now() -> ahoraServidor
+    let lastStartMs = null;   // timestamp servidor del último arranque
+    let ticking = false;
+
+    // 3) Lee desfase de servidor (.info/serverTimeOffset)
+    onValue(offsetRef, (snap) => {
+      const v = snap.val();
+      serverOffsetMs = typeof v === "number" ? v : 0;
+      document.getElementById("status").textContent = "Sincronizado";
     });
 
-    // loop para mostrar cuenta atrás
-    setInterval(() => {
-      if (lastStart) {
-        const elapsed = (Date.now() - lastStart) / 1000;
-        const remaining = 14 - elapsed;
-        document.getElementById("timer").innerText =
-          remaining > 0 ? remaining.toFixed(1) + " s" : "0.0";
-      }
-    }, 100);
+    // 4) Escucha arranques (un solo valor compartido)
+    onValue(startRef, (snap) => {
+      lastStartMs = snap.val(); // número (ms) escrito por el servidor
+      if (lastStartMs) startTicker();
+    });
+
+    // 5) Botón: escribe hora de servidor con serverTimestamp()
+    const btn = document.getElementById("startBtn");
+    btn.addEventListener("click", async () => {
+      btn.disabled = true;      // evita doble clic
+      await set(startRef, serverTimestamp());
+      setTimeout(() => (btn.disabled = false), 700); // reactivamos al poco
+    });
+
+    // 6) Bucle de render sincronizado
+    function startTicker() {
+      if (ticking) return;
+      ticking = true;
+
+      const timerEl = document.getElementById("timer");
+      const detailEl = document.getElementById("detail");
+
+      const loop = () => {
+        // Ahora del "servidor" = reloj local + offset reportado por Firebase
+        const nowServer = Date.now() + serverOffsetMs;
+
+        if (typeof lastStartMs === "number") {
+          const elapsed = (nowServer - lastStartMs) / 1000;    // s
+          const remaining = Math.max(0, 14 - elapsed);         // s
+          timerEl.textContent = remaining.toFixed(1) + " s";
+          detailEl.textContent = remaining > 0
+            ? "En curso"
+            : "Finalizado · Pulsa para reiniciar";
+
+        } else {
+          timerEl.textContent = "--";
+          detailEl.textContent = "Esperando inicio…";
+        }
+        requestAnimationFrame(loop); // refresco fluido y sincronizado
+      };
+      requestAnimationFrame(loop);
+    }
+
+    // Arranque inicial
+    startTicker();
   </script>
+</head>
+<body>
+  <h1>Cuenta atrás sincronizada (14 s)</h1>
+  <div class="row" style="margin: 10px 0 20px;">
+    <span class="pill">Canal: <b>countdown/global</b></span>
+    <span class="pill">Estado: <b id="status">Conectando…</b></span>
+    <span class="pill"><b id="detail">Esperando inicio…</b></span>
+  </div>
+
+  <div id="timer">--</div>
+  <div style="height: 16px"></div>
+  <button id="startBtn" title="Cualquier móvil lo puede pulsar">Iniciar / Reset (14 s)</button>
+
+  <p style="margin-top:24px;color:#475569">
+    Abre esta misma URL en dos móviles: si cualquiera pulsa el botón, la cuenta atrás se reinicia y
+    ambos verán el mismo valor (sin depender del reloj de cada dispositivo).
+  </p>
 </body>
 </html>
