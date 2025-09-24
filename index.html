@@ -11,6 +11,7 @@
     button { padding:10px 16px; border-radius:12px; border:1px solid #cbd5e1; background:#2563eb; color:#fff; cursor:pointer; }
     button:disabled { background:#cbd5e1; color:#475569; cursor:not-allowed; }
     .pill { font-size:.85rem; padding:4px 10px; border-radius:999px; background:#e2e8f0; }
+    .error { color:#b91c1c; font-size:.9rem; }
   </style>
 
   <!-- Firebase v9 modular -->
@@ -36,52 +37,70 @@
     const db = getDatabase(app);
 
     // Nodos de la base de datos
-    const startRef = ref(db, "countdown/global"); // guardará { startedAt: <ms servidor> }
+    // Guardamos un solo objeto: { startedAt: <epoch-ms-servidor> }
+    const startRef  = ref(db, "countdown/global");
     const offsetRef = ref(db, ".info/serverTimeOffset"); // desfase cliente-servidor
 
     // Estado local
-    let serverOffsetMs = 0;
-    let lastStartMs = null;
-    let ticking = false;
+    let serverOffsetMs = 0;   // lo sumamos a Date.now() => "ahora del servidor"
+    let lastStartMs    = null;
+    let ticking        = false;
 
-    // 3) Lee desfase de servidor
+    const statusEl = document.getElementById("status");
+    const detailEl = document.getElementById("detail");
+    const timerEl  = document.getElementById("timer");
+    const btn      = document.getElementById("startBtn");
+    const errEl    = document.getElementById("err");
+
+    // 3) Desfase de servidor
     onValue(offsetRef, (snap) => {
       const v = snap.val();
-      serverOffsetMs = typeof v === "number" ? v : 0;
-      document.getElementById("status").textContent = "Sincronizado";
+      serverOffsetMs = (typeof v === "number") ? v : 0;
+      statusEl.textContent = "Sincronizado";
     });
 
-    // 4) Escucha arranques (valor global)
+    // 4) Escucha del valor global
     onValue(startRef, (snap) => {
       const data = snap.val();
-      lastStartMs = data?.startedAt || null; // epoch (ms) que viene del servidor
+      lastStartMs = data?.startedAt || null;
+
+      // Re-habilita el botón cuando llega confirmación desde servidor
+      btn.disabled = false;
+
       if (lastStartMs) startTicker();
     });
 
-    // 5) Botón: guarda hora del servidor
-    const btn = document.getElementById("startBtn");
+    // 5) Botón: escribe hora de servidor (con manejo robusto de errores)
     btn.addEventListener("click", async () => {
       btn.disabled = true;
-      await set(startRef, { startedAt: serverTimestamp() });
-      setTimeout(() => (btn.disabled = false), 800);
+      errEl.textContent = "";
+      try {
+        await set(startRef, { startedAt: serverTimestamp() });
+        // No reactivamos aquí; lo hacemos al recibir onValue (confirmación global)
+        // como fallback de seguridad, añadimos un temporizador:
+        setTimeout(() => { if (btn.disabled) btn.disabled = false; }, 2000);
+      } catch (e) {
+        console.error(e);
+        errEl.textContent = "No se pudo escribir en el servidor. Revisa la configuración de Firebase o la conexión.";
+      } finally {
+        // En caso de error, asegura reactivación inmediata
+        if (errEl.textContent) btn.disabled = false;
+      }
     });
 
-    // 6) Bucle de render sincronizado
+    // 6) Render de la cuenta atrás sincronizada
     function startTicker() {
       if (ticking) return;
       ticking = true;
-
-      const timerEl = document.getElementById("timer");
-      const detailEl = document.getElementById("detail");
 
       const loop = () => {
         const nowServer = Date.now() + serverOffsetMs;
 
         if (typeof lastStartMs === "number") {
-          const elapsed = (nowServer - lastStartMs) / 1000;
+          const elapsed   = (nowServer - lastStartMs) / 1000; // s
           const remaining = Math.max(0, 14 - elapsed);
           timerEl.textContent = remaining.toFixed(1) + " s";
-          detailEl.textContent = remaining > 0
+          detailEl.textContent = (remaining > 0)
             ? "En curso"
             : "Finalizado · Pulsa para reiniciar";
         } else {
@@ -94,7 +113,7 @@
       requestAnimationFrame(loop);
     }
 
-    // arranque inicial
+    // Arranque del bucle (aunque aún no haya valor)
     startTicker();
   </script>
 </head>
@@ -108,11 +127,12 @@
 
   <div id="timer">--</div>
   <div style="height: 16px"></div>
-  <button id="startBtn" title="Cualquier móvil lo puede pulsar">Iniciar / Reset (14 s)</button>
+  <button id="startBtn" title="Cualquier móvil o PC lo puede pulsar">Iniciar / Reset (14 s)</button>
+  <div id="err" class="error" role="alert" aria-live="polite"></div>
 
   <p style="margin-top:24px;color:#475569">
-    Abre esta misma URL en dos móviles o en un PC y un móvil.  
-    Si cualquiera pulsa el botón, la cuenta atrás se reinicia y todos verán el mismo valor.
+    Abre esta misma URL en varios dispositivos.  
+    Si cualquiera pulsa el botón, la cuenta atrás se reinicia y todos verán el mismo valor (sin depender del reloj local).
   </p>
 </body>
 </html>
