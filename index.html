@@ -1,8 +1,8 @@
 <!doctype html>
 <html lang="es">
 <head>
-  <meta charset="utf-8">
-  <title>Cuenta atrás 14s sincronizada</title>
+  <meta charset="utf-8" />
+  <title>Cuenta atrás 14s sincronizada (Ably)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; padding: 24px; }
@@ -12,127 +12,137 @@
     button:disabled { background:#cbd5e1; color:#475569; cursor:not-allowed; }
     .pill { font-size:.85rem; padding:4px 10px; border-radius:999px; background:#e2e8f0; }
     .error { color:#b91c1c; font-size:.9rem; }
+    .ok { color:#065f46; font-size:.9rem; }
   </style>
-
-  <!-- Firebase v9 modular -->
-  <script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-    import {
-      getDatabase, ref, onValue, set, serverTimestamp
-    } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
-
-    // 1) Configura tus credenciales de Firebase
-    const firebaseConfig = {
-      apiKey: "TU_API_KEY",
-      authDomain: "TU_PROYECTO.firebaseapp.com",
-      databaseURL: "https://TU_PROYECTO-default-rtdb.europe-west1.firebasedatabase.app",
-      projectId: "TU_PROYECTO",
-      storageBucket: "TU_PROYECTO.appspot.com",
-      messagingSenderId: "XXXXXXXXXXXX",
-      appId: "1:XXXXXXXXXXXX:web:YYYYYYYYYYYYYY"
-    };
-
-    // 2) Inicializa
-    const app = initializeApp(firebaseConfig);
-    const db = getDatabase(app);
-
-    // Nodos de la base de datos
-    // Guardamos un solo objeto: { startedAt: <epoch-ms-servidor> }
-    const startRef  = ref(db, "countdown/global");
-    const offsetRef = ref(db, ".info/serverTimeOffset"); // desfase cliente-servidor
-
-    // Estado local
-    let serverOffsetMs = 0;   // lo sumamos a Date.now() => "ahora del servidor"
-    let lastStartMs    = null;
-    let ticking        = false;
-
-    const statusEl = document.getElementById("status");
-    const detailEl = document.getElementById("detail");
-    const timerEl  = document.getElementById("timer");
-    const btn      = document.getElementById("startBtn");
-    const errEl    = document.getElementById("err");
-
-    // 3) Desfase de servidor
-    onValue(offsetRef, (snap) => {
-      const v = snap.val();
-      serverOffsetMs = (typeof v === "number") ? v : 0;
-      statusEl.textContent = "Sincronizado";
-    });
-
-    // 4) Escucha del valor global
-    onValue(startRef, (snap) => {
-      const data = snap.val();
-      lastStartMs = data?.startedAt || null;
-
-      // Re-habilita el botón cuando llega confirmación desde servidor
-      btn.disabled = false;
-
-      if (lastStartMs) startTicker();
-    });
-
-    // 5) Botón: escribe hora de servidor (con manejo robusto de errores)
-    btn.addEventListener("click", async () => {
-      btn.disabled = true;
-      errEl.textContent = "";
-      try {
-        await set(startRef, { startedAt: serverTimestamp() });
-        // No reactivamos aquí; lo hacemos al recibir onValue (confirmación global)
-        // como fallback de seguridad, añadimos un temporizador:
-        setTimeout(() => { if (btn.disabled) btn.disabled = false; }, 2000);
-      } catch (e) {
-        console.error(e);
-        errEl.textContent = "No se pudo escribir en el servidor. Revisa la configuración de Firebase o la conexión.";
-      } finally {
-        // En caso de error, asegura reactivación inmediata
-        if (errEl.textContent) btn.disabled = false;
-      }
-    });
-
-    // 6) Render de la cuenta atrás sincronizada
-    function startTicker() {
-      if (ticking) return;
-      ticking = true;
-
-      const loop = () => {
-        const nowServer = Date.now() + serverOffsetMs;
-
-        if (typeof lastStartMs === "number") {
-          const elapsed   = (nowServer - lastStartMs) / 1000; // s
-          const remaining = Math.max(0, 14 - elapsed);
-          timerEl.textContent = remaining.toFixed(1) + " s";
-          detailEl.textContent = (remaining > 0)
-            ? "En curso"
-            : "Finalizado · Pulsa para reiniciar";
-        } else {
-          timerEl.textContent = "--";
-          detailEl.textContent = "Esperando inicio…";
-        }
-
-        requestAnimationFrame(loop);
-      };
-      requestAnimationFrame(loop);
-    }
-
-    // Arranque del bucle (aunque aún no haya valor)
-    startTicker();
-  </script>
+  <!-- Ably JS por CDN (bloquea mayor v2) -->
+  <script src="https://cdn.ably.com/lib/ably.min-2.js"></script>
 </head>
 <body>
   <h1>Cuenta atrás sincronizada (14 s)</h1>
   <div class="row" style="margin: 10px 0 20px;">
-    <span class="pill">Canal: <b>countdown/global</b></span>
-    <span class="pill">Estado: <b id="status">Conectando…</b></span>
-    <span class="pill"><b id="detail">Esperando inicio…</b></span>
+    <span class="pill">Canal: <b id="room">countdown:global</b></span>
+    <span class="pill">Conexión: <b id="conn">Conectando…</b></span>
+    <span class="pill">Reloj: <b id="clock">Sincronizando…</b></span>
   </div>
 
   <div id="timer">--</div>
   <div style="height: 16px"></div>
   <button id="startBtn" title="Cualquier móvil o PC lo puede pulsar">Iniciar / Reset (14 s)</button>
-  <div id="err" class="error" role="alert" aria-live="polite"></div>
+  <div id="msg" class="ok" aria-live="polite"></div>
+  <div id="err" class="error" role="alert" aria-live="assertive"></div>
 
   <p style="margin-top:24px;color:#475569">
     Abre esta misma URL en varios dispositivos.  
-    Si cualquiera pulsa el botón, la cuenta atrás se reinicia y todos verán el mismo valor (sin depender del reloj local).
+    Si cualquiera pulsa el botón, la cuenta atrás se reinicia y todos verán el mismo valor.
   </p>
+
+<script>
+(async () => {
+  // 1) CONFIGURA TU CLAVE (solo para pruebas; en producción usa tokens)
+  const ABLY_API_KEY = "PON_AQUI_TU_ABLY_API_KEY"; // demo only
+  const CHANNEL_NAME = "countdown:global";
+  const DURATION_SEC = 14;
+
+  // 2) ESTADO UI
+  const timerEl = document.getElementById("timer");
+  const startBtn = document.getElementById("startBtn");
+  const connEl = document.getElementById("conn");
+  const clockEl = document.getElementById("clock");
+  const errEl = document.getElementById("err");
+  const msgEl = document.getElementById("msg");
+
+  // 3) CONEXIÓN ABLY (Realtime WebSocket)
+  const clientId = "web-" + Math.random().toString(16).slice(2);
+  const ably = new Ably.Realtime({ key: ABLY_API_KEY, clientId });
+  const channel = ably.channels.get(CHANNEL_NAME);
+
+  ably.connection.on((stateChange) => {
+    connEl.textContent = stateChange.current;
+  });
+
+  await new Promise((res) => ably.connection.once("connected", res));
+
+  // 4) SINCRONÍA DE RELOJ (offset = serverNow - Date.now())
+  let serverOffsetMs = 0;
+  async function syncServerTime() {
+    try {
+      // REST /time devuelve [msEpoch]
+      const r = await fetch("https://rest.ably.io/time");
+      const arr = await r.json();
+      if (Array.isArray(arr) && typeof arr[0] === "number") {
+        serverOffsetMs = arr[0] - Date.now();
+        clockEl.textContent = "OK (" + Math.round(serverOffsetMs) + " ms)";
+        errEl.textContent = "";
+      }
+    } catch (e) {
+      errEl.textContent = "No se pudo sincronizar la hora del servidor.";
+    }
+  }
+  await syncServerTime();
+  // Re-sincroniza cada 10 s para limitar deriva
+  setInterval(syncServerTime, 10000);
+
+  // 5) WAKE LOCK (evitar que se apague la pantalla si el navegador lo soporta)
+  let wakeLock = null;
+  async function requestWakeLock() {
+    try {
+      if ('wakeLock' in navigator) {
+        wakeLock = await navigator.wakeLock.request('screen');
+        wakeLock.addEventListener('release', () => { /* nada */ });
+      }
+    } catch {}
+  }
+  startBtn.addEventListener("click", requestWakeLock, { once: true });
+
+  // 6) BUCLE DE RENDER
+  let endAtServerMs = null; // instante de final en tiempo de servidor (ms)
+  let rafId = null;
+  function loop() {
+    const nowServer = Date.now() + serverOffsetMs;
+    if (typeof endAtServerMs === "number") {
+      const remaining = Math.max(0, (endAtServerMs - nowServer) / 1000);
+      timerEl.textContent = remaining.toFixed(1) + " s";
+      if (remaining === 0) {
+        msgEl.textContent = "Finalizado · Pulsa para reiniciar";
+      }
+    } else {
+      timerEl.textContent = "--";
+    }
+    rafId = requestAnimationFrame(loop);
+  }
+  loop();
+
+  // 7) SUSCRIPCIÓN: al recibir "start", usamos el timestamp del servidor Ably
+  channel.subscribe("start", (message) => {
+    // message.timestamp: ms epoch de Ably (server) -> canónico
+    // Todos calculan el fin como timestampServidor + duración
+    const base = typeof message.timestamp === "number"
+      ? message.timestamp
+      : (Date.now() + serverOffsetMs); // fallback
+    endAtServerMs = base + (message.data?.duration ?? DURATION_SEC) * 1000;
+    msgEl.textContent = `Inicio confirmado (${new Date(base).toLocaleTimeString()})`;
+    // Rehabilita el botón si estaba deshabilitado
+    startBtn.disabled = false;
+  });
+
+  // 8) PUBLICAR "start" (resiliente)
+  startBtn.addEventListener("click", async () => {
+    startBtn.disabled = true;
+    errEl.textContent = "";
+    try {
+      // Publicamos sin esperar tick del servidor: al recibir el propio evento
+      // por la suscripción, fijaremos endAtServerMs con el timestamp servidor.
+      await channel.publish("start", { duration: DURATION_SEC });
+      // si todo va bien, el subscribe de arriba re-habilita el botón
+      // fallback: por si el subscribe tarda o se pierde
+      setTimeout(() => { if (startBtn.disabled) startBtn.disabled = false; }, 2000);
+    } catch (e) {
+      errEl.textContent = "No se pudo enviar el evento. Revisa la clave de Ably o la red.";
+      startBtn.disabled = false;
+    }
+  });
+
+})();
+</script>
 </body>
 </html>
