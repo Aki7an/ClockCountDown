@@ -13,14 +13,14 @@
     .pill { font-size:.85rem; padding:4px 10px; border-radius:999px; background:#e2e8f0; }
   </style>
 
-  <!-- Firebase v9 (modular) -->
+  <!-- Firebase v9 modular -->
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
     import {
       getDatabase, ref, onValue, set, serverTimestamp
     } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 
-    // 1) Configura tus credenciales
+    // 1) Configura tus credenciales de Firebase
     const firebaseConfig = {
       apiKey: "TU_API_KEY",
       authDomain: "TU_PROYECTO.firebaseapp.com",
@@ -35,34 +35,35 @@
     const app = initializeApp(firebaseConfig);
     const db = getDatabase(app);
 
-    // Un único “canal” global para todos los móviles
-    const startRef = ref(db, "countdown/global/start"); // ms epoch del servidor
+    // Nodos de la base de datos
+    const startRef = ref(db, "countdown/global"); // guardará { startedAt: <ms servidor> }
     const offsetRef = ref(db, ".info/serverTimeOffset"); // desfase cliente-servidor
 
     // Estado local
-    let serverOffsetMs = 0;   // desfase (ms) que sumamos a Date.now() -> ahoraServidor
-    let lastStartMs = null;   // timestamp servidor del último arranque
+    let serverOffsetMs = 0;
+    let lastStartMs = null;
     let ticking = false;
 
-    // 3) Lee desfase de servidor (.info/serverTimeOffset)
+    // 3) Lee desfase de servidor
     onValue(offsetRef, (snap) => {
       const v = snap.val();
       serverOffsetMs = typeof v === "number" ? v : 0;
       document.getElementById("status").textContent = "Sincronizado";
     });
 
-    // 4) Escucha arranques (un solo valor compartido)
+    // 4) Escucha arranques (valor global)
     onValue(startRef, (snap) => {
-      lastStartMs = snap.val(); // número (ms) escrito por el servidor
+      const data = snap.val();
+      lastStartMs = data?.startedAt || null; // epoch (ms) que viene del servidor
       if (lastStartMs) startTicker();
     });
 
-    // 5) Botón: escribe hora de servidor con serverTimestamp()
+    // 5) Botón: guarda hora del servidor
     const btn = document.getElementById("startBtn");
     btn.addEventListener("click", async () => {
-      btn.disabled = true;      // evita doble clic
-      await set(startRef, serverTimestamp());
-      setTimeout(() => (btn.disabled = false), 700); // reactivamos al poco
+      btn.disabled = true;
+      await set(startRef, { startedAt: serverTimestamp() });
+      setTimeout(() => (btn.disabled = false), 800);
     });
 
     // 6) Bucle de render sincronizado
@@ -74,27 +75,26 @@
       const detailEl = document.getElementById("detail");
 
       const loop = () => {
-        // Ahora del "servidor" = reloj local + offset reportado por Firebase
         const nowServer = Date.now() + serverOffsetMs;
 
         if (typeof lastStartMs === "number") {
-          const elapsed = (nowServer - lastStartMs) / 1000;    // s
-          const remaining = Math.max(0, 14 - elapsed);         // s
+          const elapsed = (nowServer - lastStartMs) / 1000;
+          const remaining = Math.max(0, 14 - elapsed);
           timerEl.textContent = remaining.toFixed(1) + " s";
           detailEl.textContent = remaining > 0
             ? "En curso"
             : "Finalizado · Pulsa para reiniciar";
-
         } else {
           timerEl.textContent = "--";
           detailEl.textContent = "Esperando inicio…";
         }
-        requestAnimationFrame(loop); // refresco fluido y sincronizado
+
+        requestAnimationFrame(loop);
       };
       requestAnimationFrame(loop);
     }
 
-    // Arranque inicial
+    // arranque inicial
     startTicker();
   </script>
 </head>
@@ -111,8 +111,8 @@
   <button id="startBtn" title="Cualquier móvil lo puede pulsar">Iniciar / Reset (14 s)</button>
 
   <p style="margin-top:24px;color:#475569">
-    Abre esta misma URL en dos móviles: si cualquiera pulsa el botón, la cuenta atrás se reinicia y
-    ambos verán el mismo valor (sin depender del reloj de cada dispositivo).
+    Abre esta misma URL en dos móviles o en un PC y un móvil.  
+    Si cualquiera pulsa el botón, la cuenta atrás se reinicia y todos verán el mismo valor.
   </p>
 </body>
 </html>
